@@ -32,27 +32,27 @@ LOG, _ = logs.setup(__name__, **util.configure_logging())
 
 
 class MissingFileException(Exception):
-    ...
+    pass
 
 
 class ProtocolError(Exception):
-    ...
+    pass
 
 
 class ConnectionRefused(Exception):
-    ...
+    pass
 
 
 class ConnectionRedirected(Exception):
-    ...
+    pass
 
 
 class ConnectionDeclined(Exception):
-    ...
+    pass
 
 
 class ConnectionClosed(Exception):
-    ...
+    pass
 
 
 # The protocol is largely documented at https://www.spice-space.org/spice-protocol.html
@@ -132,7 +132,7 @@ class SpiceSession(object):
                     [self.client_conn], [], [self.client_conn], 1)
                 if errors:
                     self.log.warning('Connection closed (error)')
-                    self._cleanup_socket()
+                    self._cleanup_socket([self.client_conn])
                     return
                 if readable:
                     client_buffered += bytearray(self.client_conn.recv(1024000))
@@ -140,7 +140,7 @@ class SpiceSession(object):
             except (ConnectionResetError, BrokenPipeError) as e:
                 self.log.error('%s on read: %s\n%s' % (type(e), e,
                                traceback.format_exc()))
-                self._cleanup_socket()
+                self._cleanup_socket([self.client_conn])
                 return
 
             try:
@@ -155,25 +155,26 @@ class SpiceSession(object):
             except (BadMagic, BadMajor, BadMinor, ProtocolError, ConnectionRedirected,
                     ConnectionRefused, ConnectionDeclined) as e:
                 self.log.info('Connection termination on processing: %s' % e)
-                self._cleanup_socket()
+                self._cleanup_socket([self.client_conn])
                 return
 
             except BrokenPipeError as e:
                 self.log.error('%s on processing: %s\n%s' % (type(e), e,
                                traceback.format_exc()))
-                self._cleanup_socket()
+                self._cleanup_socket([self.client_conn])
                 return
 
 
-class SpiceTLSSession(object):
+class SpiceTLSSession(SpiceSession):
     def __init__(self, client_conn, client_host, client_port):
+        super().__init__(client_conn, client_host, client_port)
+      
         self.client_host = client_host
         self.client_port = client_port
 
         self.client_conn = client_conn
         self.client_next_packet = self.ClientSpiceLinkMess
 
-        self.server_conn = None
         self.server_next_packet = None
 
         self.client_parser = None
@@ -213,9 +214,7 @@ class SpiceTLSSession(object):
             self.prometheus_updates.put(('bytes_proxied', labels, from_server))
             self.prometheus_updates.put(('proxy_time', labels, processing_time_consumed))
 
-            self.from_client = 0
-            self.from_server = 0
-            self.processing_time_consumed = 0
+        self.last_statistics = time.time()
 
     def run(self, prometheus_updates):
         db.record_channel_info(config.NODE_NAME, os.getpid())
