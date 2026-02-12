@@ -125,7 +125,7 @@ class SpiceSession(object):
                   'session': self.session_id,
                   'error_type': error_type,
       }
-      self.prometheus_updates.put('connection_error', labels, 1)
+      self.prometheus_updates.put('connection_errors', labels, 1)
 
     def run(self, _prometheus_updates):
         setproctitle.setproctitle('kerbside-insecure-new')
@@ -573,7 +573,7 @@ def run():
                             ['type', 'session_id'])
     proxy_time = Counter('proxy_time', 'Time consumed by proxy processing packets',
                          ['type', 'session_id'])
-    protocol_errors = Counter('connection_errors', 'Count of connection errors',
+    connection_errors = Counter('connection_errors', 'Count of connection errors',
                               ['type', 'session_id', 'error_type'])
     prometheus_updates = multiprocessing.JoinableQueue()
 
@@ -624,6 +624,8 @@ def run():
                     bytes_proxied.labels(**labels).inc(value)
                 if name == 'proxy_time':
                     proxy_time.labels(**labels).inc(value)
+                if name == 'connection_errors':
+                    connection_errors.labels(**labels).inc(value)
         except queue.Empty:
             pass
 
