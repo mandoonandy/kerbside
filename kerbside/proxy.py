@@ -119,6 +119,14 @@ class SpiceSession(object):
         except OSError:
             ...
 
+    def _emit_error(self, error):
+      labels = {
+                  'type': constants.channel_num_to_str[self.chan_type],
+                  'session': self.session_id,
+                  'error_type': error_type,
+      }
+      self.prometheus_updates.put('connection_error', labels, 1)
+
     def run(self, _prometheus_updates):
         setproctitle.setproctitle('kerbside-insecure-new')
         if config.LOG_VERBOSE:
@@ -141,6 +149,7 @@ class SpiceSession(object):
                 self.log.error('%s on read: %s\n%s' % (type(e), e,
                                traceback.format_exc()))
                 self._cleanup_socket([self.client_conn])
+                self._emit_error(type(e).__name__)
                 return
 
             try:
@@ -156,12 +165,14 @@ class SpiceSession(object):
                     ConnectionRefused, ConnectionDeclined) as e:
                 self.log.info('Connection termination on processing: %s' % e)
                 self._cleanup_socket([self.client_conn])
+                self._emit_error(type(e).__name__)
                 return
 
             except BrokenPipeError as e:
                 self.log.error('%s on processing: %s\n%s' % (type(e), e,
                                traceback.format_exc()))
                 self._cleanup_socket([self.client_conn])
+                self._emit_error(type(e).__name__)
                 return
 
 
@@ -271,6 +282,7 @@ class SpiceTLSSession(SpiceSession):
                 self.log.error('%s on read: %s\n%s' % (type(e), e,
                                traceback.format_exc()))
                 self._cleanup_sockets(sockets)
+                self._emit_error(type(e).__name__)
                 return
 
             client_total = 0
@@ -295,12 +307,14 @@ class SpiceTLSSession(SpiceSession):
                     SpiceConnectionError) as e:
                 self.log.info('Connection termination on processing: %s' % e)
                 self._cleanup_sockets(sockets)
+                self._emit_error(type(e).__name__)
                 return
 
             except BrokenPipeError as e:
                 self.log.error('%s on processing: %s\n%s' % (type(e), e,
                                traceback.format_exc()))
                 self._cleanup_sockets(sockets)
+                self._emit_error(type(e).__name__)
                 return
 
             if client_total + server_total > 0 and self.server_conn:
@@ -559,6 +573,8 @@ def run():
                             ['type', 'session_id'])
     proxy_time = Counter('proxy_time', 'Time consumed by proxy processing packets',
                          ['type', 'session_id'])
+    protocol_errors = Counter('connection_errors', 'Count of connection errors',
+                              ['type', 'session_id', 'error_type'])
     prometheus_updates = multiprocessing.JoinableQueue()
 
     workers = []
@@ -609,7 +625,7 @@ def run():
                 if name == 'proxy_time':
                     proxy_time.labels(**labels).inc(value)
         except queue.Empty:
-            ...
+            pass
 
         for conn, client_host, client_port, secured in listen.accept():
             if not secured:
